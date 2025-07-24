@@ -57,9 +57,11 @@ class ConnectionManager:
                 logging.exception(f"消息处理异常: {e}")
                 await websocket.send_json({"type": "error", "detail": str(e)})
 
-    def handler(self, func: Handler, name: str = None):
-        self.handlers[name or func.__name__] = func
-        return func
+    def handler(self, name: str):
+        def decorator(func: Handler):
+            self.handlers[name] = func
+            return func
+        return decorator
 
 
 manager = ConnectionManager()
@@ -92,8 +94,6 @@ class HealthCheck(BaseModel):
     status: str = "pong"
 
 
+@manager.handler("health_check")
 async def health_check(message: str, websocket: WebSocket, context: Dict[str, Any]):
     await websocket.send_json(HealthCheck().model_dump())
-
-
-manager.handler(health_check, "health_check")

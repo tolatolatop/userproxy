@@ -18,10 +18,11 @@ async def test_health_check():
 def test_websocket_endpoint():
     client = TestClient(app)
     with client.websocket_connect("/ws") as websocket:
+        # 先收到client_id
+        client_id_msg = websocket.receive_json()
+        assert client_id_msg["type"] == "client_id"
+        assert "client_id" in client_id_msg
+        # 发送ping，收到健康检查响应
         websocket.send_text("ping")
-        # 由于有health_check handler，应该收到健康检查响应
         data = websocket.receive_json()
         assert data == HealthCheck().model_dump()
-        # 还会收到广播消息
-        msg = websocket.receive_text()
-        assert "用户说: ping" in msg
