@@ -51,7 +51,11 @@ class ConnectionManager:
     async def handle_message(self, message: str, websocket: WebSocket):
         context = {"client_id": self.ws_to_id.get(websocket)}
         for handler in self.handlers.values():
-            await handler(message, websocket, context)
+            try:
+                await handler(message, websocket, context)
+            except Exception as e:
+                logging.exception(f"消息处理异常: {e}")
+                await websocket.send_json({"type": "error", "detail": str(e)})
 
     def handler(self, func: Handler, name: str = None):
         self.handlers[name or func.__name__] = func
@@ -67,10 +71,20 @@ async def websocket_endpoint(websocket: WebSocket):
     try:
         while True:
             data = await websocket.receive_text()
-            await manager.handle_message(data, websocket)  # 先处理handler
+            try:
+                await manager.handle_message(data, websocket)
+            except Exception as e:
+                logging.exception(f"消息处理异常: {e}")
+                await websocket.send_json({"type": "error", "detail": str(e)})
     except WebSocketDisconnect:
         manager.disconnect(websocket)
-        await manager.broadcast("有用户离开了聊天室")
+    except Exception as e:
+        manager.disconnect(websocket)
+        logging.exception(f"WebSocket连接异常: {e}")
+        try:
+            await websocket.close()
+        except Exception:
+            pass
 
 
 class HealthCheck(BaseModel):
