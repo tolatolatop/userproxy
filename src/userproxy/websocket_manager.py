@@ -1,7 +1,10 @@
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from typing import List
+import logging
 
 app = FastAPI()
+
+access_logger = logging.getLogger("access")
 
 
 class ConnectionManager:
@@ -11,9 +14,13 @@ class ConnectionManager:
     async def connect(self, websocket: WebSocket):
         await websocket.accept()
         self.active_connections.append(websocket)
+        logging.info(f"新用户连接: {websocket.client}")
+        access_logger.info(f"CONNECT {websocket.client}")
 
     def disconnect(self, websocket: WebSocket):
         self.active_connections.remove(websocket)
+        logging.info(f"用户断开: {websocket.client}")
+        access_logger.info(f"DISCONNECT {websocket.client}")
 
     async def send_personal_message(self, message: str, websocket: WebSocket):
         await websocket.send_text(message)

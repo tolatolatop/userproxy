@@ -2,12 +2,24 @@ version: 1
 formatters:
   simple:
     format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  access:
+    format: "%(asctime)s - %(message)s"
 handlers:
   console:
     class: logging.StreamHandler
     level: INFO
     formatter: simple
     stream: ext://sys.stdout
+  access_file:
+    class: logging.FileHandler
+    level: INFO
+    formatter: access
+    filename: saccess.log
+loggers:
+  access:
+    level: INFO
+    handlers: [access_file]
+    propagate: False
 root:
   level: INFO
   handlers: [console] 
