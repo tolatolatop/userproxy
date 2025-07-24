@@ -1,15 +1,18 @@
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from typing import List
+from typing import List, Callable, Awaitable, Dict, Any
 import logging
 
 app = FastAPI()
 
 access_logger = logging.getLogger("access")
 
+Handler = Callable[[str, WebSocket, Dict[str, Any]], Awaitable[None]]
+
 
 class ConnectionManager:
     def __init__(self):
         self.active_connections: List[WebSocket] = []
+        self.handlers: Dict[str, Handler] = {}
 
     async def connect(self, websocket: WebSocket):
         await websocket.accept()
@@ -28,6 +31,15 @@ class ConnectionManager:
     async def broadcast(self, message: str):
         for connection in self.active_connections:
             await connection.send_text(message)
+
+    async def handle_message(self, message: str, websocket: WebSocket):
+        context = {}
+        for handler in self.handlers.values():
+            await handler(message, websocket, context)
+
+    def handler(self, func: Handler, name: str = None):
+        self.handlers[name or func.__name__] = func
+        return func
 
 
 manager = ConnectionManager()
