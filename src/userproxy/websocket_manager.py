@@ -1,6 +1,7 @@
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from typing import List, Callable, Awaitable, Dict, Any
 import logging
+from pydantic import BaseModel
 
 app = FastAPI()
 
@@ -55,3 +56,15 @@ async def websocket_endpoint(websocket: WebSocket):
     except WebSocketDisconnect:
         manager.disconnect(websocket)
         await manager.broadcast("有用户离开了聊天室")
+
+
+class HealthCheck(BaseModel):
+    type: str = "ping"
+    status: str = "pong"
+
+
+async def health_check(message: str, websocket: WebSocket, context: Dict[str, Any]):
+    await websocket.send_json(HealthCheck().model_dump())
+
+
+manager.handler(health_check, "health_check")
