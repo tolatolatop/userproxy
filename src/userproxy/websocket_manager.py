@@ -52,7 +52,7 @@ async def websocket_endpoint(websocket: WebSocket):
     try:
         while True:
             data = await websocket.receive_text()
-            await manager.broadcast(f"用户说: {data}")
+            await manager.handle_message(data, websocket)  # 先处理handler
     except WebSocketDisconnect:
         manager.disconnect(websocket)
         await manager.broadcast("有用户离开了聊天室")
