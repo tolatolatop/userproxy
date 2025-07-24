@@ -96,4 +96,23 @@ class HealthCheck(BaseModel):
 
 @manager.handler("health_check")
 async def health_check(message: str, websocket: WebSocket, context: Dict[str, Any]):
-    await websocket.send_json(HealthCheck().model_dump())
+    if message == "ping":
+        await websocket.send_json(HealthCheck().model_dump())
+
+
+class LargeMessageChunk(BaseModel):
+    type: str = "large_message_chunk"
+    name: str
+    serial_id: int
+    size: int
+    chunk: str
+
+
+@manager.handler("large_message_chunk")
+async def large_message_chunk(message: str, websocket: WebSocket, context: Dict[str, Any]):
+    if "large_message_chunk" in message:
+        try:
+            LargeMessageChunk.model_validate_json(message)
+        except Exception as e:
+            logging.exception(f"消息处理异常: {e}")
+            await websocket.send_json({"type": "error", "detail": str(e)})
