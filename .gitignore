@@ -66,3 +66,6 @@ coverage.xml
 # OS files
 .DS_Store
 Thumbs.db 
+
+.env.dev
+.env.prod
