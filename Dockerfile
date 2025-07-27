@@ -10,7 +10,7 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # 安装poetry
-RUN pip install poetry==1.7.1
+RUN pip install poetry==2.1.1
 
 # 配置poetry不创建虚拟环境（因为Docker容器本身就是隔离的）
 RUN poetry config virtualenvs.create false
@@ -19,7 +19,7 @@ RUN poetry config virtualenvs.create false
 COPY pyproject.toml poetry.lock ./
 
 # 安装依赖
-RUN poetry install --only=main --no-dev
+RUN poetry install --only=main --no-root
 
 # 复制源代码
 COPY src/ ./src/
