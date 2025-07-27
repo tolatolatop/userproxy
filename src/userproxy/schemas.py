@@ -10,6 +10,15 @@ class MessageType(str, Enum):
     PONG = "pong"
     COMMAND = "command"
     DATA = "data"
+    CLIENT_ID = "client_id"
+
+
+class ClientIdMessage(BaseModel):
+    """客户端ID分配消息"""
+    type: MessageType = Field(MessageType.CLIENT_ID, description="消息类型")
+    client_id: str = Field(..., description="分配的客户端ID")
+    timestamp: datetime = Field(
+        default_factory=datetime.now, description="时间戳")
 
 
 class PingPongMessage(BaseModel):
@@ -59,4 +68,4 @@ class DataMessage(BaseModel):
 
 
 # 联合类型，用于处理所有类型的WebSocket消息
-WebSocketMessage = PingPongMessage | CommandMessage | CommandResultMessage | DataMessage
+WebSocketMessage = ClientIdMessage | PingPongMessage | CommandMessage | CommandResultMessage | DataMessage

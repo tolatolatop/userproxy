@@ -2,11 +2,30 @@ import pytest
 import asyncio
 import json
 from datetime import datetime
-from src.userproxy.websocket_manager import manager, ping_handler, pong_handler, command_handler, data_handler
-from src.userproxy.schemas import PingPongMessage, CommandMessage, CommandResultMessage, DataMessage, MessageType
+from src.userproxy.websocket_manager import manager, ping_handler, pong_handler, command_handler, data_handler, client_id_handler
+from src.userproxy.schemas import ClientIdMessage, PingPongMessage, CommandMessage, CommandResultMessage, DataMessage, MessageType
 from unittest.mock import AsyncMock, patch
 from fastapi.testclient import TestClient
 from src.userproxy import app
+
+
+# 测试client_id消息处理
+@pytest.mark.asyncio
+async def test_client_id_handler():
+    websocket = AsyncMock()
+    context = {"client_id": "test_client"}
+
+    # 测试客户端ID消息
+    client_id_data = {
+        "type": "client_id",
+        "client_id": "new_client_123",
+        "timestamp": datetime.now().isoformat()
+    }
+
+    await client_id_handler(client_id_data, websocket, context)
+
+    # client_id处理器不应该发送响应
+    websocket.send_json.assert_not_called()
 
 
 # 测试基础连接和消息处理
@@ -375,6 +394,17 @@ async def test_handler_exception():
 
 
 # 测试Pydantic模型验证
+def test_client_id_message_validation():
+    """测试客户端ID消息验证"""
+    # 测试有效的客户端ID消息
+    valid_client_id = ClientIdMessage(
+        client_id="test_client_123"
+    )
+    assert valid_client_id.type == MessageType.CLIENT_ID
+    assert valid_client_id.client_id == "test_client_123"
+    assert valid_client_id.timestamp is not None
+
+
 def test_ping_pong_message_validation():
     # 测试有效的ping消息
     valid_ping = PingPongMessage(

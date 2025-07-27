@@ -10,6 +10,7 @@ import threading
 import time
 
 from .schemas import (
+    ClientIdMessage,
     PingPongMessage,
     CommandMessage,
     CommandResultMessage,
@@ -92,7 +93,8 @@ class ConnectionManager:
         access_logger.info(
             f"CONNECT {websocket.client}, client_id={client_id}")
         # 连接后可发送client_id给客户端
-        await websocket.send_json({"type": "client_id", "client_id": client_id})
+        client_id_message = ClientIdMessage(client_id=client_id)
+        await websocket.send_json(client_id_message.model_dump(mode='json'))
 
         # 如果是第一个连接，启动ping任务
         if len(self.active_connections) == 1:
@@ -204,6 +206,17 @@ async def websocket_endpoint(websocket: WebSocket):
 
 
 # 注册消息处理器
+@manager.handler("client_id")
+async def client_id_handler(data: Dict[str, Any], websocket: WebSocket, context: Dict[str, Any]):
+    """处理客户端ID消息"""
+    try:
+        validated_message = ClientIdMessage.model_validate(data)
+        client_id = context.get("client_id")
+        logging.info(f"收到客户端ID确认 {client_id}: {validated_message.client_id}")
+    except ValidationError as e:
+        logging.warning(f"客户端ID消息验证失败: {e}")
+
+
 @manager.handler("ping")
 async def ping_handler(data: Dict[str, Any], websocket: WebSocket, context: Dict[str, Any]):
     """处理ping消息"""

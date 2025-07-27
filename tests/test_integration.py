@@ -17,6 +17,7 @@ class TestWebSocketIntegration:
             client_id_msg = websocket.receive_json()
             assert client_id_msg["type"] == "client_id"
             assert "client_id" in client_id_msg
+            assert "timestamp" in client_id_msg
             assert len(client_id_msg["client_id"]) > 0
 
     def test_ping_pong_communication(self, client):
