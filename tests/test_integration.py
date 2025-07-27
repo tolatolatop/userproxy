@@ -342,3 +342,84 @@ class TestWebSocketIntegration:
                 assert result_response["success"] is True
                 assert "result" in result_response
                 assert result_response["result"]["output"] == "test command"
+
+    def test_websocket_reconnect_functionality(self, client):
+        """测试WebSocket重连功能"""
+        test_client_id = "integration_reconnect_test"
+
+        # 第一次连接
+        with client.websocket_connect(f"/ws/{test_client_id}") as websocket1:
+            client_id_msg1 = websocket1.receive_json()
+            assert client_id_msg1["type"] == "client_id"
+            assert client_id_msg1["client_id"] == test_client_id
+
+            # 发送ping消息
+            ping_data = {"type": "ping",
+                         "timestamp": datetime.now().isoformat()}
+            websocket1.send_text(json.dumps(ping_data))
+            pong_response1 = websocket1.receive_json()
+            assert pong_response1["type"] == "pong"
+
+        # 重连（使用相同的client_id）
+        with client.websocket_connect(f"/ws/{test_client_id}") as websocket2:
+            client_id_msg2 = websocket2.receive_json()
+            assert client_id_msg2["type"] == "client_id"
+            assert client_id_msg2["client_id"] == test_client_id
+
+            # 重连后仍然可以正常通信
+            ping_data = {"type": "ping",
+                         "timestamp": datetime.now().isoformat()}
+            websocket2.send_text(json.dumps(ping_data))
+            pong_response2 = websocket2.receive_json()
+            assert pong_response2["type"] == "pong"
+
+    def test_reconnect_command_forwarding(self, client):
+        """测试重连后的命令转发功能"""
+        test_client_id = "reconnect_command_test"
+
+        # 创建两个客户端，其中一个使用重连
+        with client.websocket_connect("/ws") as websocket1:
+            client1_msg = websocket1.receive_json()
+            client1_id = client1_msg["client_id"]
+
+            # 第二个客户端使用重连端点
+            with client.websocket_connect(f"/ws/{test_client_id}") as websocket2:
+                client2_msg = websocket2.receive_json()
+                client2_id = client2_msg["client_id"]
+                assert client2_id == test_client_id
+
+                # client1 发送命令给重连的client2
+                command_data = {
+                    "type": "command",
+                    "client_id": client1_id,
+                    "receiver": test_client_id,
+                    "command": "echo 'reconnect test'",
+                    "request_id": "reconnect_cmd",
+                    "timestamp": datetime.now().isoformat()
+                }
+                websocket1.send_text(json.dumps(command_data))
+
+                # client2 应该收到转发的命令
+                forwarded_command = websocket2.receive_json()
+                assert forwarded_command["type"] == "command"
+                assert forwarded_command["client_id"] == client1_id
+                assert forwarded_command["receiver"] == test_client_id
+                assert forwarded_command["command"] == "echo 'reconnect test'"
+
+                # client2 返回命令结果
+                result_data = {
+                    "type": "command",
+                    "client_id": test_client_id,
+                    "receiver": client1_id,
+                    "request_id": "reconnect_cmd",
+                    "success": True,
+                    "result": {"output": "reconnect test"},
+                    "timestamp": datetime.now().isoformat()
+                }
+                websocket2.send_text(json.dumps(result_data))
+
+                # client1 应该收到命令结果
+                result_response = websocket1.receive_json()
+                assert result_response["type"] == "command"
+                assert result_response["success"] is True
+                assert result_response["result"]["output"] == "reconnect test"

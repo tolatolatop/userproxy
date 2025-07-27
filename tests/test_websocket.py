@@ -36,6 +36,21 @@ def test_websocket_endpoint():
         client_id_msg = websocket.receive_json()
         assert client_id_msg["type"] == "client_id"
         assert "client_id" in client_id_msg
+        assert "timestamp" in client_id_msg
+        assert len(client_id_msg["client_id"]) > 0
+
+
+def test_websocket_reconnect_endpoint():
+    """测试WebSocket重连端点"""
+    client = TestClient(app)
+    test_client_id = "test_reconnect_client"
+
+    with client.websocket_connect(f"/ws/{test_client_id}") as websocket:
+        # 收到client_id确认
+        client_id_msg = websocket.receive_json()
+        assert client_id_msg["type"] == "client_id"
+        assert client_id_msg["client_id"] == test_client_id
+        assert "timestamp" in client_id_msg
 
 
 # 测试ping/pong消息处理
@@ -450,3 +465,27 @@ def test_data_message_validation():
     assert valid_data.data == "Hello, World!"
     assert valid_data.chunk_index == 0
     assert valid_data.is_final is True
+
+
+def test_websocket_reconnect_with_existing_client():
+    """测试重连时断开现有连接"""
+    client = TestClient(app)
+    test_client_id = "test_existing_client"
+
+    # 第一次连接
+    with client.websocket_connect(f"/ws/{test_client_id}") as websocket1:
+        client_id_msg1 = websocket1.receive_json()
+        assert client_id_msg1["client_id"] == test_client_id
+
+        # 第二次连接（重连）
+        with client.websocket_connect(f"/ws/{test_client_id}") as websocket2:
+            client_id_msg2 = websocket2.receive_json()
+            assert client_id_msg2["client_id"] == test_client_id
+
+            # 第一个连接应该被断开
+            try:
+                websocket1.receive_json()
+                assert False, "第一个连接应该被断开"
+            except Exception:
+                # 预期的异常，连接已被断开
+                pass

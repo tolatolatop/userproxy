@@ -83,15 +83,37 @@ class ConnectionManager:
         for dead_ws in dead_connections:
             self.disconnect(dead_ws)
 
-    async def connect(self, websocket: WebSocket):
+    async def connect(self, websocket: WebSocket, client_id: str = None):
         await websocket.accept()
-        client_id = str(uuid.uuid4())
+
+        if client_id is None:
+            # 生成新的client_id
+            client_id = str(uuid.uuid4())
+            logging.info(f"新用户连接: {websocket.client}, client_id={client_id}")
+            access_logger.info(
+                f"CONNECT {websocket.client}, client_id={client_id}")
+        else:
+            # 使用指定的client_id重连
+            logging.info(f"用户重连: {websocket.client}, client_id={client_id}")
+            access_logger.info(
+                f"RECONNECT {websocket.client}, client_id={client_id}")
+
+            # 如果client_id已存在，断开旧连接
+            if client_id in self.client_map:
+                old_websocket = self.client_map[client_id]
+                if old_websocket in self.active_connections:
+                    self.active_connections.remove(old_websocket)
+                self.ws_to_id.pop(old_websocket, None)
+                try:
+                    await old_websocket.close()
+                except Exception:
+                    pass
+                logging.info(f"断开旧连接: client_id={client_id}")
+
         self.active_connections.append(websocket)
         self.client_map[client_id] = websocket
         self.ws_to_id[websocket] = client_id
-        logging.info(f"新用户连接: {websocket.client}, client_id={client_id}")
-        access_logger.info(
-            f"CONNECT {websocket.client}, client_id={client_id}")
+
         # 连接后可发送client_id给客户端
         client_id_message = ClientIdMessage(client_id=client_id)
         await websocket.send_json(client_id_message.model_dump(mode='json'))
@@ -199,6 +221,29 @@ async def websocket_endpoint(websocket: WebSocket):
     except Exception as e:
         manager.disconnect(websocket)
         logging.exception(f"WebSocket连接异常: {e}")
+        try:
+            await websocket.close()
+        except Exception:
+            pass
+
+
+@app.websocket("/ws/{client_id}")
+async def websocket_reconnect_endpoint(websocket: WebSocket, client_id: str):
+    """允许客户端使用特定ID重连的WebSocket端点"""
+    try:
+        await manager.connect(websocket, client_id)
+        while True:
+            data = await websocket.receive_text()
+            try:
+                await manager.handle_message(data, websocket)
+            except Exception as e:
+                logging.exception(f"消息处理异常: {e}")
+                await websocket.send_json({"type": "error", "detail": str(e)})
+    except WebSocketDisconnect:
+        manager.disconnect(websocket)
+    except Exception as e:
+        manager.disconnect(websocket)
+        logging.exception(f"WebSocket重连异常: {e}")
         try:
             await websocket.close()
         except Exception:
