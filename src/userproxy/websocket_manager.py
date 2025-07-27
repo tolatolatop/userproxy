@@ -73,7 +73,7 @@ class ConnectionManager:
                     type=MessageType.PING,
                     client_id=self.ws_to_id.get(websocket)
                 )
-                await websocket.send_json(ping_message.model_dump())
+                await websocket.send_json(ping_message.model_dump(mode='json'))
             except Exception as e:
                 logging.warning(f"发送ping失败，连接可能已断开: {e}")
                 dead_connections.append(websocket)
@@ -216,7 +216,7 @@ async def ping_handler(data: Dict[str, Any], websocket: WebSocket, context: Dict
             type=MessageType.PONG,
             client_id=client_id
         )
-        await websocket.send_json(pong_message.model_dump())
+        await websocket.send_json(pong_message.model_dump(mode='json'))
         logging.debug(f"回复pong给 {client_id}")
     except ValidationError as e:
         logging.warning(f"Ping消息验证失败: {e}")
@@ -259,7 +259,7 @@ async def command_handler(data: Dict[str, Any], websocket: WebSocket, context: D
                             "data": validated_message.data},
                     timestamp=validated_message.timestamp
                 )
-                await websocket.send_json(result_message.model_dump())
+                await websocket.send_json(result_message.model_dump(mode='json'))
             except Exception as e:
                 error_message = CommandResultMessage(
                     client_id=client_id,
@@ -269,7 +269,7 @@ async def command_handler(data: Dict[str, Any], websocket: WebSocket, context: D
                     error=str(e),
                     timestamp=validated_message.timestamp
                 )
-                await websocket.send_json(error_message.model_dump())
+                await websocket.send_json(error_message.model_dump(mode='json'))
 
     except ValidationError as e:
         logging.warning(f"命令消息验证失败: {e}")
