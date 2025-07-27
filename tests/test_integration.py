@@ -45,11 +45,11 @@ class TestWebSocketIntegration:
             client_id_msg = websocket.receive_json()
             client_id = client_id_msg["client_id"]
 
-            # 发送命令
+            # 发送命令给不存在的接收者
             command_data = {
                 "type": "command",
                 "client_id": client_id,
-                "receiver": "server",
+                "receiver": "nonexistent_server",
                 "command": "echo 'Hello World'",
                 "data": {"env": "test"},
                 "request_id": "test_req_001",
@@ -57,14 +57,12 @@ class TestWebSocketIntegration:
             }
             websocket.send_text(json.dumps(command_data))
 
-            # 接收命令结果
+            # 接收错误响应（接收者不存在）
             result_response = websocket.receive_json()
             assert result_response["type"] == "command"
-            assert result_response["client_id"] == client_id
-            assert result_response["receiver"] == client_id
-            assert result_response["request_id"] == "test_req_001"
-            assert result_response["success"] is True
-            assert "result" in result_response
+            assert result_response["success"] is False
+            assert "接收者" in result_response["error"]
+            assert "nonexistent_server" in result_response["error"]
 
     def test_data_transmission(self, client):
         """测试数据传输"""
@@ -168,7 +166,7 @@ class TestWebSocketIntegration:
             client_id_msg = websocket.receive_json()
             client_id = client_id_msg["client_id"]
 
-            # 发送多个命令
+            # 发送多个命令给不存在的接收者
             commands = [
                 {"command": "pwd", "request_id": "req_001"},
                 {"command": "ls", "request_id": "req_002"},
@@ -179,18 +177,20 @@ class TestWebSocketIntegration:
                 command_data = {
                     "type": "command",
                     "client_id": client_id,
-                    "receiver": "server",
+                    "receiver": "nonexistent_server",
                     "command": cmd["command"],
                     "request_id": cmd["request_id"],
                     "timestamp": datetime.now().isoformat()
                 }
                 websocket.send_text(json.dumps(command_data))
 
-                # 接收每个命令的结果
+                # 接收每个命令的错误响应（接收者不存在）
                 result_response = websocket.receive_json()
                 assert result_response["type"] == "command"
                 assert result_response["request_id"] == cmd["request_id"]
-                assert result_response["success"] is True
+                assert result_response["success"] is False
+                assert "接收者" in result_response["error"]
+                assert "nonexistent_server" in result_response["error"]
 
     def test_mixed_message_types(self, client):
         """测试混合消息类型处理"""
@@ -206,11 +206,11 @@ class TestWebSocketIntegration:
             pong_response = websocket.receive_json()
             assert pong_response["type"] == "pong"
 
-            # 发送命令
+            # 发送命令给不存在的接收者
             command_data = {
                 "type": "command",
                 "client_id": client_id,
-                "receiver": "server",
+                "receiver": "nonexistent_server",
                 "command": "date",
                 "request_id": "mixed_test",
                 "timestamp": datetime.now().isoformat()
@@ -218,7 +218,8 @@ class TestWebSocketIntegration:
             websocket.send_text(json.dumps(command_data))
             result_response = websocket.receive_json()
             assert result_response["type"] == "command"
-            assert result_response["success"] is True
+            assert result_response["success"] is False
+            assert "接收者" in result_response["error"]
 
             # 发送数据
             data_message = {
@@ -237,3 +238,106 @@ class TestWebSocketIntegration:
             websocket.send_text(json.dumps(ping_data))
             pong_response2 = websocket.receive_json()
             assert pong_response2["type"] == "pong"
+
+    def test_command_forwarding_between_clients(self, client):
+        """测试客户端之间的命令转发"""
+        # 创建两个客户端连接
+        with client.websocket_connect("/ws") as websocket1:
+            client1_msg = websocket1.receive_json()
+            client1_id = client1_msg["client_id"]
+
+            with client.websocket_connect("/ws") as websocket2:
+                client2_msg = websocket2.receive_json()
+                client2_id = client2_msg["client_id"]
+
+                # client1 发送命令给 client2
+                command_data = {
+                    "type": "command",
+                    "client_id": client1_id,
+                    "receiver": client2_id,
+                    "command": "echo 'Hello from client1'",
+                    "request_id": "forward_test",
+                    "timestamp": datetime.now().isoformat()
+                }
+                websocket1.send_text(json.dumps(command_data))
+
+                # client2 应该收到转发的命令
+                forwarded_command = websocket2.receive_json()
+                assert forwarded_command["type"] == "command"
+                assert forwarded_command["client_id"] == client1_id
+                assert forwarded_command["receiver"] == client2_id
+                assert forwarded_command["command"] == "echo 'Hello from client1'"
+                assert forwarded_command["request_id"] == "forward_test"
+
+                # client2 发送命令结果给 client1
+                result_data = {
+                    "type": "command",
+                    "client_id": client2_id,
+                    "receiver": client1_id,
+                    "request_id": "forward_test",
+                    "success": True,
+                    "result": {"output": "Hello from client1"},
+                    "timestamp": datetime.now().isoformat()
+                }
+                websocket2.send_text(json.dumps(result_data))
+
+                # client1 应该收到命令结果
+                result_response = websocket1.receive_json()
+                assert result_response["type"] == "command"
+                assert result_response["client_id"] == client2_id
+                assert result_response["receiver"] == client1_id
+                assert result_response["request_id"] == "forward_test"
+                assert result_response["success"] is True
+                assert "result" in result_response
+
+    def test_command_with_real_receiver(self, client):
+        """测试有真实接收者的命令执行"""
+        # 创建两个客户端连接，模拟真实的命令转发
+        with client.websocket_connect("/ws") as websocket1:
+            client1_msg = websocket1.receive_json()
+            client1_id = client1_msg["client_id"]
+
+            with client.websocket_connect("/ws") as websocket2:
+                client2_msg = websocket2.receive_json()
+                client2_id = client2_msg["client_id"]
+
+                # client1 发送命令给 client2
+                command_data = {
+                    "type": "command",
+                    "client_id": client1_id,
+                    "receiver": client2_id,
+                    "command": "echo 'test command'",
+                    "request_id": "real_test",
+                    "timestamp": datetime.now().isoformat()
+                }
+                websocket1.send_text(json.dumps(command_data))
+
+                # client2 应该收到转发的命令
+                forwarded_command = websocket2.receive_json()
+                assert forwarded_command["type"] == "command"
+                assert forwarded_command["client_id"] == client1_id
+                assert forwarded_command["receiver"] == client2_id
+                assert forwarded_command["command"] == "echo 'test command'"
+                assert forwarded_command["request_id"] == "real_test"
+
+                # client2 模拟执行命令并返回结果
+                result_data = {
+                    "type": "command",
+                    "client_id": client2_id,
+                    "receiver": client1_id,
+                    "request_id": "real_test",
+                    "success": True,
+                    "result": {"output": "test command", "exit_code": 0},
+                    "timestamp": datetime.now().isoformat()
+                }
+                websocket2.send_text(json.dumps(result_data))
+
+                # client1 应该收到命令执行结果
+                result_response = websocket1.receive_json()
+                assert result_response["type"] == "command"
+                assert result_response["client_id"] == client2_id
+                assert result_response["receiver"] == client1_id
+                assert result_response["request_id"] == "real_test"
+                assert result_response["success"] is True
+                assert "result" in result_response
+                assert result_response["result"]["output"] == "test command"

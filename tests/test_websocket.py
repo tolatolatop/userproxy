@@ -64,7 +64,7 @@ async def test_command_handler():
     websocket = AsyncMock()
     context = {"client_id": "server"}
 
-    # 测试命令消息
+    # 测试命令消息 - 接收者存在的情况
     command_data = {
         "type": "command",
         "client_id": "client1",
@@ -75,17 +75,47 @@ async def test_command_handler():
         "timestamp": datetime.now().isoformat()
     }
 
-    await command_handler(command_data, websocket, context)
+    # 模拟接收者存在
+    with patch.object(manager, 'client_map', {'server': websocket}):
+        await command_handler(command_data, websocket, context)
 
-    # 验证发送了命令结果
-    websocket.send_json.assert_called_once()
-    sent_data = websocket.send_json.call_args[0][0]
-    assert sent_data["type"] == "command"
-    assert sent_data["client_id"] == "server"
-    assert sent_data["receiver"] == "client1"
-    assert sent_data["request_id"] == "req_123"
-    assert sent_data["success"] is True
-    assert "result" in sent_data
+        # 验证命令被转发给接收者
+        websocket.send_json.assert_called_once()
+        sent_data = websocket.send_json.call_args[0][0]
+        assert sent_data["type"] == "command"
+        assert sent_data["client_id"] == "client1"
+        assert sent_data["receiver"] == "server"
+        assert sent_data["command"] == "ls -la"
+        assert sent_data["request_id"] == "req_123"
+
+
+@pytest.mark.asyncio
+async def test_command_handler_receiver_not_found():
+    websocket = AsyncMock()
+    context = {"client_id": "client1"}
+
+    # 测试命令消息 - 接收者不存在的情况
+    command_data = {
+        "type": "command",
+        "client_id": "client1",
+        "receiver": "nonexistent_server",
+        "command": "ls -la",
+        "data": {"path": "/tmp"},
+        "request_id": "req_123",
+        "timestamp": datetime.now().isoformat()
+    }
+
+    # 模拟接收者不存在
+    with patch.object(manager, 'client_map', {}):
+        await command_handler(command_data, websocket, context)
+
+        # 验证发送了错误响应
+        websocket.send_json.assert_called_once()
+        sent_data = websocket.send_json.call_args[0][0]
+        assert sent_data["type"] == "command"
+        assert sent_data["success"] is False
+        assert "接收者" in sent_data["error"]
+        assert "nonexistent_server" in sent_data["error"]
 
 
 @pytest.mark.asyncio
@@ -104,10 +134,41 @@ async def test_command_result_handler():
         "timestamp": datetime.now().isoformat()
     }
 
-    await command_handler(result_data, websocket, context)
+    # 模拟目标接收者存在
+    target_websocket = AsyncMock()
+    with patch.object(manager, 'client_map', {'client1': target_websocket}):
+        await command_handler(result_data, websocket, context)
 
-    # 命令结果处理器不应该发送响应
-    websocket.send_json.assert_not_called()
+        # 验证命令结果被转发给目标接收者
+        target_websocket.send_json.assert_called_once()
+        sent_data = target_websocket.send_json.call_args[0][0]
+        assert sent_data["type"] == "command"
+        assert sent_data["success"] is True
+        assert sent_data["receiver"] == "client1"
+
+
+@pytest.mark.asyncio
+async def test_command_result_handler_target_not_found():
+    websocket = AsyncMock()
+    context = {"client_id": "client1"}
+
+    # 测试命令结果消息 - 目标接收者不存在
+    result_data = {
+        "type": "command",
+        "client_id": "server",
+        "receiver": "nonexistent_client",
+        "request_id": "req_123",
+        "success": True,
+        "result": {"output": "file1.txt file2.txt"},
+        "timestamp": datetime.now().isoformat()
+    }
+
+    # 模拟目标接收者不存在
+    with patch.object(manager, 'client_map', {}):
+        await command_handler(result_data, websocket, context)
+
+        # 命令结果处理器不应该发送响应（因为目标不存在）
+        websocket.send_json.assert_not_called()
 
 
 # 测试数据消息处理
