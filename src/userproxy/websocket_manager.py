@@ -1,13 +1,22 @@
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from typing import List, Callable, Awaitable, Dict, Any
 import logging
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 import uuid
 import json
 
 import asyncio
 import threading
 import time
+
+from .schemas import (
+    PingPongMessage,
+    CommandMessage,
+    CommandResultMessage,
+    DataMessage,
+    WebSocketMessage,
+    MessageType
+)
 
 app = FastAPI()
 
@@ -60,7 +69,11 @@ class ConnectionManager:
         dead_connections = []
         for websocket in self.active_connections:
             try:
-                await websocket.send_json({"type": "ping", "timestamp": time.time()})
+                ping_message = PingPongMessage(
+                    type=MessageType.PING,
+                    client_id=self.ws_to_id.get(websocket)
+                )
+                await websocket.send_json(ping_message.model_dump())
             except Exception as e:
                 logging.warning(f"发送ping失败，连接可能已断开: {e}")
                 dead_connections.append(websocket)
@@ -108,13 +121,55 @@ class ConnectionManager:
             await connection.send_text(message)
 
     async def handle_message(self, message: str, websocket: WebSocket):
-        context = {"client_id": self.ws_to_id.get(websocket)}
-        for handler in self.handlers.values():
-            try:
-                await handler(message, websocket, context)
-            except Exception as e:
-                logging.exception(f"消息处理异常: {e}")
-                await websocket.send_json({"type": "error", "detail": str(e)})
+        """处理接收到的WebSocket消息"""
+        client_id = self.ws_to_id.get(websocket)
+        context = {"client_id": client_id}
+
+        try:
+            # 尝试解析为JSON
+            data = json.loads(message)
+            message_type = data.get("type")
+
+            # 记录消息接收
+            logging.info(f"收到来自 {client_id} 的消息: {message_type}")
+
+            # 查找对应的处理器
+            handler = self.handlers.get(message_type)
+            if handler:
+                try:
+                    await handler(data, websocket, context)
+                except Exception as e:
+                    logging.exception(f"处理器执行异常 {client_id}: {e}")
+                    await websocket.send_json({"type": "error", "detail": str(e)})
+            else:
+                # 未定义的消息类型
+                await self._handle_undefined_message(data, websocket, context)
+
+        except json.JSONDecodeError:
+            # 非JSON格式的消息
+            logging.warning(f"收到非JSON格式消息 {client_id}: {message}")
+            await self._handle_undefined_message({"raw_message": message}, websocket, context)
+        except Exception as e:
+            logging.exception(f"消息处理异常 {client_id}: {e}")
+            await websocket.send_json({"type": "error", "detail": str(e)})
+
+    async def _handle_undefined_message(self, data: Dict[str, Any], websocket: WebSocket, context: Dict[str, Any]):
+        """处理未定义的消息类型"""
+        client_id = context.get("client_id")
+        message_type = data.get("type", "unknown")
+
+        # 记录未定义的消息类型
+        logging.warning(f"未定义的消息类型 {client_id}: {message_type}")
+        logging.debug(f"未定义消息内容 {client_id}: {data}")
+
+        # 发送错误响应
+        error_response = {
+            "type": "error",
+            "detail": f"未定义的消息类型: {message_type}",
+            "supported_types": list(self.handlers.keys()),
+            "original_message": data
+        }
+        await websocket.send_json(error_response)
 
     def handler(self, name: str):
         def decorator(func: Handler):
@@ -148,42 +203,100 @@ async def websocket_endpoint(websocket: WebSocket):
             pass
 
 
-class HealthCheck(BaseModel):
-    type: str = "ping"
-    status: str = "pong"
+# 注册消息处理器
+@manager.handler("ping")
+async def ping_handler(data: Dict[str, Any], websocket: WebSocket, context: Dict[str, Any]):
+    """处理ping消息"""
+    try:
+        validated_message = PingPongMessage.model_validate(data)
+        client_id = context.get("client_id")
 
-
-@manager.handler("health_check")
-async def health_check(message: str, websocket: WebSocket, context: Dict[str, Any]):
-    if message == "ping":
-        await websocket.send_json(HealthCheck().model_dump())
+        # 收到ping，回复pong
+        pong_message = PingPongMessage(
+            type=MessageType.PONG,
+            client_id=client_id
+        )
+        await websocket.send_json(pong_message.model_dump())
+        logging.debug(f"回复pong给 {client_id}")
+    except ValidationError as e:
+        logging.warning(f"Ping消息验证失败: {e}")
+        await websocket.send_json({"type": "error", "detail": f"消息格式错误: {str(e)}"})
 
 
 @manager.handler("pong")
-async def pong_handler(message: str, websocket: WebSocket, context: Dict[str, Any]):
-    """处理客户端对ping的响应"""
+async def pong_handler(data: Dict[str, Any], websocket: WebSocket, context: Dict[str, Any]):
+    """处理pong消息"""
     try:
-        data = json.loads(message)
-        if data.get("type") == "pong":
-            client_id = context.get("client_id")
-            logging.debug(f"收到来自 {client_id} 的pong响应")
-    except Exception as e:
-        logging.debug(f"处理pong响应时出错: {e}")
+        validated_message = PingPongMessage.model_validate(data)
+        client_id = context.get("client_id")
+        logging.debug(f"收到来自 {client_id} 的pong响应")
+    except ValidationError as e:
+        logging.warning(f"Pong消息验证失败: {e}")
 
 
-class LargeMessageChunk(BaseModel):
-    type: str = "large_message_chunk"
-    name: str
-    serial_id: int
-    size: int
-    chunk: str
+@manager.handler("command")
+async def command_handler(data: Dict[str, Any], websocket: WebSocket, context: Dict[str, Any]):
+    """处理命令消息"""
+    client_id = context.get("client_id")
+
+    try:
+        # 检查是否为命令结果消息
+        if "success" in data:
+            validated_message = CommandResultMessage.model_validate(data)
+            logging.info(f"收到命令结果 {client_id}: 成功={validated_message.success}")
+        else:
+            validated_message = CommandMessage.model_validate(data)
+            logging.info(f"处理命令 {client_id}: {validated_message.command}")
+
+            # 模拟命令执行
+            try:
+                result_message = CommandResultMessage(
+                    client_id=client_id,
+                    receiver=validated_message.client_id,
+                    request_id=validated_message.request_id or "default",
+                    success=True,
+                    result={"output": f"命令 '{validated_message.command}' 执行成功",
+                            "data": validated_message.data},
+                    timestamp=validated_message.timestamp
+                )
+                await websocket.send_json(result_message.model_dump())
+            except Exception as e:
+                error_message = CommandResultMessage(
+                    client_id=client_id,
+                    receiver=validated_message.client_id,
+                    request_id=validated_message.request_id or "default",
+                    success=False,
+                    error=str(e),
+                    timestamp=validated_message.timestamp
+                )
+                await websocket.send_json(error_message.model_dump())
+
+    except ValidationError as e:
+        logging.warning(f"命令消息验证失败: {e}")
+        await websocket.send_json({"type": "error", "detail": f"消息格式错误: {str(e)}"})
 
 
-@manager.handler("large_message_chunk")
-async def large_message_chunk(message: str, websocket: WebSocket, context: Dict[str, Any]):
-    if "large_message_chunk" in message:
-        try:
-            LargeMessageChunk.model_validate_json(message)
-        except Exception as e:
-            logging.exception(f"消息处理异常: {e}")
-            await websocket.send_json({"type": "error", "detail": str(e)})
+@manager.handler("data")
+async def data_handler(data: Dict[str, Any], websocket: WebSocket, context: Dict[str, Any]):
+    """处理数据消息"""
+    try:
+        validated_message = DataMessage.model_validate(data)
+        client_id = context.get("client_id")
+        logging.info(
+            f"处理数据消息 {client_id}: 分片 {validated_message.chunk_index}/{validated_message.total_chunks}")
+
+        # 这里可以添加数据分片重组逻辑
+        if validated_message.is_final:
+            logging.info(
+                f"数据消息完成 {client_id}: 总共 {validated_message.total_chunks} 个分片")
+
+    except ValidationError as e:
+        logging.warning(f"数据消息验证失败: {e}")
+        await websocket.send_json({"type": "error", "detail": f"消息格式错误: {str(e)}"})
+
+
+# 示例：可以添加自定义消息处理器
+# @manager.handler("custom_message")
+# async def custom_message_handler(data: Dict[str, Any], websocket: WebSocket, context: Dict[str, Any]):
+#     # 自定义消息处理逻辑
+#     pass
