@@ -303,6 +303,11 @@ async def command_handler(data: Dict[str, Any], websocket: WebSocket, context: D
             validated_message = CommandResultMessage.model_validate(data)
             logging.info(f"收到命令结果 {client_id}: 成功={validated_message.success}")
 
+            # 检查接收者是否等于发送者ID
+            if validated_message.receiver == client_id:
+                logging.info(f"接收者等于发送者ID，跳过消息发送: {client_id}")
+                return
+
             # 命令结果消息：转发给原始发送者
             target_websocket = manager.client_map.get(
                 validated_message.receiver)
@@ -316,6 +321,11 @@ async def command_handler(data: Dict[str, Any], websocket: WebSocket, context: D
             validated_message = CommandMessage.model_validate(data)
             logging.info(
                 f"处理命令 {client_id}: {validated_message.command} -> {validated_message.receiver}")
+
+            # 检查接收者是否等于发送者ID
+            if validated_message.receiver == client_id:
+                logging.info(f"接收者等于发送者ID，跳过消息发送: {client_id}")
+                return
 
             # 查找接收者
             receiver_websocket = manager.client_map.get(
