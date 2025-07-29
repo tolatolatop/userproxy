@@ -4,6 +4,8 @@ formatters:
     format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
   access:
     format: "%(asctime)s - %(message)s"
+  error:
+    format: "%(asctime)s - %(name)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s"
 handlers:
   console:
     class: logging.StreamHandler
@@ -14,7 +16,12 @@ handlers:
     class: logging.FileHandler
     level: INFO
     formatter: access
-    filename: saccess.log
+    filename: ./logs/saccess.log
+  error_file:
+    class: logging.FileHandler
+    level: WARNING
+    formatter: error
+    filename: ./logs/error.log
 loggers:
   access:
     level: INFO
@@ -22,4 +29,4 @@ loggers:
     propagate: False
 root:
   level: INFO
-  handlers: [console] 
+  handlers: [console, error_file] 
