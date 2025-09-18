@@ -1,5 +1,5 @@
 from fastapi import FastAPI, WebSocketDisconnect
-from .websocket import WebSocket
+from .websocket import WebSocket, FastAPIWebSocket
 from typing import List, Callable, Awaitable, Dict, Any
 import logging
 from pydantic import BaseModel, ValidationError
@@ -169,7 +169,7 @@ class ConnectionManager:
                     error_message = ErrorMessage(
                         client_id=client_id,
                         error_message="处理器执行异常",
-                        error_detail=str(e)
+                        detail=str(e)
                     )
                     await websocket.send_message(error_message)
             else:
@@ -185,7 +185,7 @@ class ConnectionManager:
             error_message = ErrorMessage(
                 client_id=client_id,
                 error_message="消息处理异常",
-                error_detail=str(e)
+                detail=str(e)
             )
             await websocket.send_message(error_message)
 
@@ -202,7 +202,7 @@ class ConnectionManager:
         error_message = ErrorMessage(
             client_id=client_id,
             error_message=f"未定义的消息类型: {message_type}",
-            error_detail=f"支持的消息类型: {', '.join(self.handlers.keys())}",
+            detail=f"未定义的消息类型，支持的消息类型: {', '.join(self.handlers.keys())}",
             original_message=data
         )
         await websocket.send_message(error_message)
@@ -218,7 +218,8 @@ manager = ConnectionManager()
 
 
 @app.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket):
+async def websocket_endpoint(websocket: FastAPIWebSocket):
+    websocket = WebSocket(websocket)
     await manager.connect(websocket)
     try:
         while True:
@@ -229,7 +230,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 logging.exception(f"消息处理异常: {e}")
                 error_message = ErrorMessage(
                     error_message="消息处理异常",
-                    error_detail=str(e)
+                    detail=str(e)
                 )
                 await websocket.send_message(error_message)
     except WebSocketDisconnect:
@@ -244,8 +245,9 @@ async def websocket_endpoint(websocket: WebSocket):
 
 
 @app.websocket("/ws/{client_id}")
-async def websocket_reconnect_endpoint(websocket: WebSocket, client_id: str):
+async def websocket_reconnect_endpoint(websocket: FastAPIWebSocket, client_id: str):
     """允许客户端使用特定ID重连的WebSocket端点"""
+    websocket = WebSocket(websocket)
     try:
         await manager.connect(websocket, client_id)
         while True:
@@ -256,7 +258,7 @@ async def websocket_reconnect_endpoint(websocket: WebSocket, client_id: str):
                 logging.exception(f"消息处理异常: {e}")
                 error_message = ErrorMessage(
                     error_message="消息处理异常",
-                    error_detail=str(e)
+                    detail=str(e)
                 )
                 await websocket.send_message(error_message)
     except WebSocketDisconnect:
@@ -301,7 +303,7 @@ async def ping_handler(data: Dict[str, Any], websocket: WebSocket, context: Dict
         error_message = ErrorMessage(
             client_id=context.get("client_id"),
             error_message="消息格式错误",
-            error_detail=f"Ping消息验证失败: {str(e)}"
+            detail=f"Ping消息验证失败: {str(e)}"
         )
         await websocket.send_message(error_message)
 
@@ -395,7 +397,7 @@ async def command_handler(data: Dict[str, Any], websocket: WebSocket, context: D
         error_message = ErrorMessage(
             client_id=context.get("client_id"),
             error_message="消息格式错误",
-            error_detail=f"命令消息验证失败: {str(e)}"
+            detail=f"命令消息验证失败: {str(e)}"
         )
         await websocket.send_message(error_message)
 
@@ -419,7 +421,7 @@ async def data_handler(data: Dict[str, Any], websocket: WebSocket, context: Dict
         error_message = ErrorMessage(
             client_id=context.get("client_id"),
             error_message="消息格式错误",
-            error_detail=f"数据消息验证失败: {str(e)}"
+            detail=f"数据消息验证失败: {str(e)}"
         )
         await websocket.send_message(error_message)
 

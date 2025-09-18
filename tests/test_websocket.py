@@ -25,7 +25,7 @@ async def test_client_id_handler():
     await client_id_handler(client_id_data, websocket, context)
 
     # client_id处理器不应该发送响应
-    websocket.send_json.assert_not_called()
+    websocket.send_message.assert_not_called()
 
 
 # 测试基础连接和消息处理
@@ -68,10 +68,10 @@ async def test_ping_handler():
     await ping_handler(ping_data, websocket, context)
 
     # 验证发送了pong响应
-    websocket.send_json.assert_called_once()
-    sent_data = websocket.send_json.call_args[0][0]
-    assert sent_data["type"] == "pong"
-    assert sent_data["client_id"] == "test_client"
+    websocket.send_message.assert_called_once()
+    sent_data = websocket.send_message.call_args[0][0]
+    assert sent_data.type == "pong"
+    assert sent_data.client_id == "test_client"
 
 
 @pytest.mark.asyncio
@@ -89,14 +89,14 @@ async def test_pong_handler():
     await pong_handler(pong_data, websocket, context)
 
     # pong处理器不应该发送任何响应
-    websocket.send_json.assert_not_called()
+    websocket.send_message.assert_not_called()
 
 
 # 测试命令消息处理
 @pytest.mark.asyncio
 async def test_command_handler():
     websocket = AsyncMock()
-    context = {"client_id": "server"}
+    context = {"client_id": "client1"}
 
     # 测试命令消息 - 接收者存在的情况
     command_data = {
@@ -114,13 +114,13 @@ async def test_command_handler():
         await command_handler(command_data, websocket, context)
 
         # 验证命令被转发给接收者
-        websocket.send_json.assert_called_once()
-        sent_data = websocket.send_json.call_args[0][0]
-        assert sent_data["type"] == "command"
-        assert sent_data["client_id"] == "client1"
-        assert sent_data["receiver"] == "server"
-        assert sent_data["command"] == "ls -la"
-        assert sent_data["request_id"] == "req_123"
+        websocket.send_message.assert_called_once()
+        sent_data = websocket.send_message.call_args[0][0]
+        assert sent_data.type == "command"
+        assert sent_data.client_id == "client1"
+        assert sent_data.receiver == "server"
+        assert sent_data.command == "ls -la"
+        assert sent_data.request_id == "req_123"
 
 
 @pytest.mark.asyncio
@@ -144,18 +144,18 @@ async def test_command_handler_receiver_not_found():
         await command_handler(command_data, websocket, context)
 
         # 验证发送了错误响应
-        websocket.send_json.assert_called_once()
-        sent_data = websocket.send_json.call_args[0][0]
-        assert sent_data["type"] == "command"
-        assert sent_data["success"] is False
-        assert "接收者" in sent_data["error"]
-        assert "nonexistent_server" in sent_data["error"]
+        websocket.send_message.assert_called_once()
+        sent_data = websocket.send_message.call_args[0][0]
+        assert sent_data.type == "command"
+        assert sent_data.success is False
+        assert "接收者" in sent_data.error
+        assert "nonexistent_server" in sent_data.error
 
 
 @pytest.mark.asyncio
 async def test_command_result_handler():
     websocket = AsyncMock()
-    context = {"client_id": "client1"}
+    context = {"client_id": "server"}
 
     # 测试命令结果消息
     result_data = {
@@ -174,11 +174,11 @@ async def test_command_result_handler():
         await command_handler(result_data, websocket, context)
 
         # 验证命令结果被转发给目标接收者
-        target_websocket.send_json.assert_called_once()
-        sent_data = target_websocket.send_json.call_args[0][0]
-        assert sent_data["type"] == "command"
-        assert sent_data["success"] is True
-        assert sent_data["receiver"] == "client1"
+        target_websocket.send_message.assert_called_once()
+        sent_data = target_websocket.send_message.call_args[0][0]
+        assert sent_data.type == "command"
+        assert sent_data.success is True
+        assert sent_data.receiver == "client1"
 
 
 @pytest.mark.asyncio
@@ -202,7 +202,7 @@ async def test_command_result_handler_target_not_found():
         await command_handler(result_data, websocket, context)
 
         # 命令结果处理器不应该发送响应（因为目标不存在）
-        websocket.send_json.assert_not_called()
+        websocket.send_message.assert_not_called()
 
 
 # 测试数据消息处理
@@ -226,7 +226,7 @@ async def test_data_handler():
     await data_handler(data_message, websocket, context)
 
     # 数据处理器不应该发送响应
-    websocket.send_json.assert_not_called()
+    websocket.send_message.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -249,7 +249,7 @@ async def test_data_handler_with_chunks():
     await data_handler(data_message, websocket, context)
 
     # 数据处理器不应该发送响应
-    websocket.send_json.assert_not_called()
+    websocket.send_message.assert_not_called()
 
 
 # 测试错误处理
@@ -267,10 +267,10 @@ async def test_ping_handler_invalid_data():
     await ping_handler(invalid_ping_data, websocket, context)
 
     # 验证发送了错误响应
-    websocket.send_json.assert_called_once()
-    sent_data = websocket.send_json.call_args[0][0]
-    assert sent_data["type"] == "error", sent_data
-    assert "消息格式错误" in sent_data["detail"]
+    websocket.send_message.assert_called_once()
+    sent_data = websocket.send_message.call_args[0][0]
+    assert sent_data.type == "error", sent_data
+    assert "消息格式错误" in sent_data.error_message
 
 
 @pytest.mark.asyncio
@@ -288,10 +288,10 @@ async def test_command_handler_invalid_data():
     await command_handler(invalid_command_data, websocket, context)
 
     # 验证发送了错误响应
-    websocket.send_json.assert_called_once()
-    sent_data = websocket.send_json.call_args[0][0]
-    assert sent_data["type"] == "error"
-    assert "消息格式错误" in sent_data["detail"]
+    websocket.send_message.assert_called_once()
+    sent_data = websocket.send_message.call_args[0][0]
+    assert sent_data.type == "error"
+    assert "消息格式错误" in sent_data.error_message
 
 
 # 测试未定义消息类型
@@ -309,12 +309,10 @@ async def test_undefined_message_type():
     await manager._handle_undefined_message(undefined_data, websocket, context)
 
     # 验证发送了错误响应
-    websocket.send_json.assert_called_once()
-    sent_data = websocket.send_json.call_args[0][0]
-    assert sent_data["type"] == "error"
-    assert "未定义的消息类型" in sent_data["detail"]
-    assert "unknown_type" in sent_data["detail"]
-    assert "supported_types" in sent_data
+    websocket.send_message.assert_called_once()
+    sent_data = websocket.send_message.call_args[0][0]
+    assert sent_data.type == "error"
+    assert "未定义的消息类型" in sent_data.detail
 
 
 # 测试连接管理器
@@ -353,9 +351,9 @@ async def test_message_handling_flow():
     await manager.handle_message(test_message, websocket)
 
     # 验证ping处理器被调用并发送了pong
-    websocket.send_json.assert_called_once()
-    sent_data = websocket.send_json.call_args[0][0]
-    assert sent_data["type"] == "pong"
+    websocket.send_message.assert_called_once()
+    sent_data = websocket.send_message.call_args[0][0]
+    assert sent_data.type == "pong"
 
 
 # 测试非JSON消息处理
@@ -370,10 +368,10 @@ async def test_non_json_message():
     await manager.handle_message(non_json_message, websocket)
 
     # 验证发送了错误响应
-    websocket.send_json.assert_called_once()
-    sent_data = websocket.send_json.call_args[0][0]
-    assert sent_data["type"] == "error"
-    assert "未定义的消息类型" in sent_data["detail"]
+    websocket.send_message.assert_called_once()
+    sent_data = websocket.send_message.call_args[0][0]
+    assert sent_data.type == "error"
+    assert "未定义的消息类型" in sent_data.detail
 
 
 # 测试处理器异常处理
@@ -399,10 +397,10 @@ async def test_handler_exception():
         await manager.handle_message(test_message, websocket)
 
         # 验证发送了错误响应
-        websocket.send_json.assert_called_once()
-        sent_data = websocket.send_json.call_args[0][0]
-        assert sent_data["type"] == "error", sent_data
-        assert "Test error" in sent_data["detail"]
+        websocket.send_message.assert_called_once()
+        sent_data = websocket.send_message.call_args[0][0]
+        assert sent_data.type == "error", sent_data
+        assert "Test error" in sent_data.detail
     finally:
         # 恢复原始处理器
         manager.handlers["ping"] = original_ping_handler

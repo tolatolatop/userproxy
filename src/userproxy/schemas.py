@@ -75,7 +75,7 @@ class ErrorMessage(BaseModel):
     receiver: Optional[str] = Field(None, description="接收错误消息的目标对象（可选）")
     error_code: Optional[str] = Field(None, description="错误代码")
     error_message: str = Field(..., description="错误消息")
-    error_detail: Optional[str] = Field(None, description="详细错误信息")
+    detail: Optional[str] = Field(None, description="详细错误信息")
     request_id: Optional[str] = Field(None, description="关联的请求ID（如果有）")
     timestamp: datetime = Field(
         default_factory=datetime.now, description="时间戳")

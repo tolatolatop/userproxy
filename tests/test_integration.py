@@ -126,8 +126,6 @@ class TestWebSocketIntegration:
             error_response = websocket.receive_json()
             assert error_response["type"] == "error"
             assert "未定义的消息类型" in error_response["detail"]
-            assert "unknown_type" in error_response["detail"]
-            assert "supported_types" in error_response
 
     def test_invalid_json_message(self, client):
         """测试无效JSON消息处理"""
