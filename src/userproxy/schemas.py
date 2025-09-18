@@ -11,6 +11,7 @@ class MessageType(str, Enum):
     COMMAND = "command"
     DATA = "data"
     CLIENT_ID = "client_id"
+    ERROR = "error"
 
 
 class ClientIdMessage(BaseModel):
@@ -67,5 +68,19 @@ class DataMessage(BaseModel):
     is_final: bool = Field(False, description="是否为最后一个分片")
 
 
+class ErrorMessage(BaseModel):
+    """错误消息"""
+    type: MessageType = Field(MessageType.ERROR, description="消息类型")
+    client_id: Optional[str] = Field(None, description="客户端ID（可选）")
+    receiver: Optional[str] = Field(None, description="接收错误消息的目标对象（可选）")
+    error_code: Optional[str] = Field(None, description="错误代码")
+    error_message: str = Field(..., description="错误消息")
+    error_detail: Optional[str] = Field(None, description="详细错误信息")
+    request_id: Optional[str] = Field(None, description="关联的请求ID（如果有）")
+    timestamp: datetime = Field(
+        default_factory=datetime.now, description="时间戳")
+    original_message: Optional[Dict] = Field(None, description="原始消息（如果错误来自消息处理）")
+
+
 # 联合类型，用于处理所有类型的WebSocket消息
-WebSocketMessage = ClientIdMessage | PingPongMessage | CommandMessage | CommandResultMessage | DataMessage
+WebSocketMessage = ClientIdMessage | PingPongMessage | CommandMessage | CommandResultMessage | DataMessage | ErrorMessage

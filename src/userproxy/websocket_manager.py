@@ -15,6 +15,7 @@ from .schemas import (
     CommandMessage,
     CommandResultMessage,
     DataMessage,
+    ErrorMessage,
     WebSocketMessage,
     MessageType
 )
@@ -164,7 +165,12 @@ class ConnectionManager:
                     await handler(data, websocket, context)
                 except Exception as e:
                     logging.exception(f"处理器执行异常 {client_id}: {e}")
-                    await websocket.send_json({"type": "error", "detail": str(e)})
+                    error_message = ErrorMessage(
+                        client_id=client_id,
+                        error_message="处理器执行异常",
+                        error_detail=str(e)
+                    )
+                    await websocket.send_json(error_message.model_dump(mode='json'))
             else:
                 # 未定义的消息类型
                 await self._handle_undefined_message(data, websocket, context)
@@ -175,7 +181,12 @@ class ConnectionManager:
             await self._handle_undefined_message({"raw_message": message}, websocket, context)
         except Exception as e:
             logging.exception(f"消息处理异常 {client_id}: {e}")
-            await websocket.send_json({"type": "error", "detail": str(e)})
+            error_message = ErrorMessage(
+                client_id=client_id,
+                error_message="消息处理异常",
+                error_detail=str(e)
+            )
+            await websocket.send_json(error_message.model_dump(mode='json'))
 
     async def _handle_undefined_message(self, data: Dict[str, Any], websocket: WebSocket, context: Dict[str, Any]):
         """处理未定义的消息类型"""
@@ -187,13 +198,13 @@ class ConnectionManager:
         logging.debug(f"未定义消息内容 {client_id}: {data}")
 
         # 发送错误响应
-        error_response = {
-            "type": "error",
-            "detail": f"未定义的消息类型: {message_type}",
-            "supported_types": list(self.handlers.keys()),
-            "original_message": data
-        }
-        await websocket.send_json(error_response)
+        error_message = ErrorMessage(
+            client_id=client_id,
+            error_message=f"未定义的消息类型: {message_type}",
+            error_detail=f"支持的消息类型: {', '.join(self.handlers.keys())}",
+            original_message=data
+        )
+        await websocket.send_json(error_message.model_dump(mode='json'))
 
     def handler(self, name: str):
         def decorator(func: Handler):
@@ -215,7 +226,11 @@ async def websocket_endpoint(websocket: WebSocket):
                 await manager.handle_message(data, websocket)
             except Exception as e:
                 logging.exception(f"消息处理异常: {e}")
-                await websocket.send_json({"type": "error", "detail": str(e)})
+                error_message = ErrorMessage(
+                    error_message="消息处理异常",
+                    error_detail=str(e)
+                )
+                await websocket.send_json(error_message.model_dump(mode='json'))
     except WebSocketDisconnect:
         manager.disconnect(websocket)
     except Exception as e:
@@ -238,7 +253,11 @@ async def websocket_reconnect_endpoint(websocket: WebSocket, client_id: str):
                 await manager.handle_message(data, websocket)
             except Exception as e:
                 logging.exception(f"消息处理异常: {e}")
-                await websocket.send_json({"type": "error", "detail": str(e)})
+                error_message = ErrorMessage(
+                    error_message="消息处理异常",
+                    error_detail=str(e)
+                )
+                await websocket.send_json(error_message.model_dump(mode='json'))
     except WebSocketDisconnect:
         manager.disconnect(websocket)
     except Exception as e:
@@ -278,7 +297,12 @@ async def ping_handler(data: Dict[str, Any], websocket: WebSocket, context: Dict
         logging.debug(f"回复pong给 {client_id}")
     except ValidationError as e:
         logging.warning(f"Ping消息验证失败: {e}")
-        await websocket.send_json({"type": "error", "detail": f"消息格式错误: {str(e)}"})
+        error_message = ErrorMessage(
+            client_id=context.get("client_id"),
+            error_message="消息格式错误",
+            error_detail=f"Ping消息验证失败: {str(e)}"
+        )
+        await websocket.send_json(error_message.model_dump(mode='json'))
 
 
 @manager.handler("pong")
@@ -363,7 +387,12 @@ async def command_handler(data: Dict[str, Any], websocket: WebSocket, context: D
 
     except ValidationError as e:
         logging.warning(f"命令消息验证失败: {e}")
-        await websocket.send_json({"type": "error", "detail": f"消息格式错误: {str(e)}"})
+        error_message = ErrorMessage(
+            client_id=context.get("client_id"),
+            error_message="消息格式错误",
+            error_detail=f"命令消息验证失败: {str(e)}"
+        )
+        await websocket.send_json(error_message.model_dump(mode='json'))
 
 
 @manager.handler("data")
@@ -382,7 +411,12 @@ async def data_handler(data: Dict[str, Any], websocket: WebSocket, context: Dict
 
     except ValidationError as e:
         logging.warning(f"数据消息验证失败: {e}")
-        await websocket.send_json({"type": "error", "detail": f"消息格式错误: {str(e)}"})
+        error_message = ErrorMessage(
+            client_id=context.get("client_id"),
+            error_message="消息格式错误",
+            error_detail=f"数据消息验证失败: {str(e)}"
+        )
+        await websocket.send_json(error_message.model_dump(mode='json'))
 
 
 # 示例：可以添加自定义消息处理器
