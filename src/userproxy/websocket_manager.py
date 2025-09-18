@@ -316,75 +316,79 @@ async def pong_handler(data: Dict[str, Any], websocket: WebSocket, context: Dict
         logging.warning(f"Pong消息验证失败: {e}")
 
 
+async def handle_command_result(data: Dict[str, Any], websocket: WebSocket, context: Dict[str, Any]):
+    """处理命令结果消息"""
+    client_id = context.get("client_id")
+    validated_message = CommandResultMessage.model_validate(data)
+    logging.info(f"收到命令结果 {client_id}: 成功={validated_message.success}")
+
+    # 检查接收者是否等于发送者ID
+    if validated_message.receiver == client_id:
+        logging.info(f"接收者等于发送者ID，跳过消息发送: {client_id}")
+        return
+
+    # 命令结果消息：转发给原始发送者
+    target_websocket = manager.client_map.get(validated_message.receiver)
+    if target_websocket:
+        await target_websocket.send_json(validated_message.model_dump(mode='json'))
+        logging.info(f"命令结果已转发给 {validated_message.receiver}")
+    else:
+        logging.warning(f"目标接收者 {validated_message.receiver} 不存在，无法转发命令结果")
+
+
+async def handle_command_message(data: Dict[str, Any], websocket: WebSocket, context: Dict[str, Any]):
+    """处理命令消息"""
+    client_id = context.get("client_id")
+    validated_message = CommandMessage.model_validate(data)
+    logging.info(f"处理命令 {client_id}: {validated_message.command} -> {validated_message.receiver}")
+
+    # 检查接收者是否等于发送者ID
+    if validated_message.receiver == client_id:
+        logging.info(f"接收者等于发送者ID，跳过消息发送: {client_id}")
+        return
+
+    # 查找接收者
+    receiver_websocket = manager.client_map.get(validated_message.receiver)
+    if not receiver_websocket:
+        # 接收者不存在，返回错误
+        error_message = CommandResultMessage(
+            client_id=client_id,
+            receiver=validated_message.client_id,
+            request_id=validated_message.request_id or "default",
+            success=False,
+            error=f"接收者 '{validated_message.receiver}' 不存在",
+            timestamp=validated_message.timestamp
+        )
+        await websocket.send_json(error_message.model_dump(mode='json'))
+        logging.warning(f"接收者 {validated_message.receiver} 不存在，命令执行失败")
+    else:
+        # 接收者存在，转发命令
+        try:
+            await receiver_websocket.send_json(validated_message.model_dump(mode='json'))
+            logging.info(f"命令已转发给接收者 {validated_message.receiver}")
+        except Exception as e:
+            # 转发失败，返回错误
+            error_message = CommandResultMessage(
+                client_id=client_id,
+                receiver=validated_message.client_id,
+                request_id=validated_message.request_id or "default",
+                success=False,
+                error=f"转发命令失败: {str(e)}",
+                timestamp=validated_message.timestamp
+            )
+            await websocket.send_json(error_message.model_dump(mode='json'))
+            logging.error(f"转发命令给 {validated_message.receiver} 失败: {e}")
+
+
 @manager.handler("command")
 async def command_handler(data: Dict[str, Any], websocket: WebSocket, context: Dict[str, Any]):
     """处理命令消息"""
-    client_id = context.get("client_id")
-
     try:
         # 检查是否为命令结果消息
         if "success" in data:
-            validated_message = CommandResultMessage.model_validate(data)
-            logging.info(f"收到命令结果 {client_id}: 成功={validated_message.success}")
-
-            # 检查接收者是否等于发送者ID
-            if validated_message.receiver == client_id:
-                logging.info(f"接收者等于发送者ID，跳过消息发送: {client_id}")
-                return
-
-            # 命令结果消息：转发给原始发送者
-            target_websocket = manager.client_map.get(
-                validated_message.receiver)
-            if target_websocket:
-                await target_websocket.send_json(validated_message.model_dump(mode='json'))
-                logging.info(f"命令结果已转发给 {validated_message.receiver}")
-            else:
-                logging.warning(
-                    f"目标接收者 {validated_message.receiver} 不存在，无法转发命令结果")
+            await handle_command_result(data, websocket, context)
         else:
-            validated_message = CommandMessage.model_validate(data)
-            logging.info(
-                f"处理命令 {client_id}: {validated_message.command} -> {validated_message.receiver}")
-
-            # 检查接收者是否等于发送者ID
-            if validated_message.receiver == client_id:
-                logging.info(f"接收者等于发送者ID，跳过消息发送: {client_id}")
-                return
-
-            # 查找接收者
-            receiver_websocket = manager.client_map.get(
-                validated_message.receiver)
-            if not receiver_websocket:
-                # 接收者不存在，返回错误
-                error_message = CommandResultMessage(
-                    client_id=client_id,
-                    receiver=validated_message.client_id,
-                    request_id=validated_message.request_id or "default",
-                    success=False,
-                    error=f"接收者 '{validated_message.receiver}' 不存在",
-                    timestamp=validated_message.timestamp
-                )
-                await websocket.send_json(error_message.model_dump(mode='json'))
-                logging.warning(f"接收者 {validated_message.receiver} 不存在，命令执行失败")
-            else:
-                # 接收者存在，转发命令
-                try:
-                    await receiver_websocket.send_json(validated_message.model_dump(mode='json'))
-                    logging.info(f"命令已转发给接收者 {validated_message.receiver}")
-                except Exception as e:
-                    # 转发失败，返回错误
-                    error_message = CommandResultMessage(
-                        client_id=client_id,
-                        receiver=validated_message.client_id,
-                        request_id=validated_message.request_id or "default",
-                        success=False,
-                        error=f"转发命令失败: {str(e)}",
-                        timestamp=validated_message.timestamp
-                    )
-                    await websocket.send_json(error_message.model_dump(mode='json'))
-                    logging.error(
-                        f"转发命令给 {validated_message.receiver} 失败: {e}")
-
+            await handle_command_message(data, websocket, context)
     except ValidationError as e:
         logging.warning(f"命令消息验证失败: {e}")
         error_message = ErrorMessage(
